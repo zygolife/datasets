@@ -1,5 +1,6 @@
 *~
 #*
 *.#
-jgi_download_curl.sh
+jgi_download_curl.sh*
 .JGI_cookies
+gbk_download.log
