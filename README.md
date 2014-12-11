@@ -1,4 +1,4 @@
 datasets
 ========
 
-zygo genomes and related datasetse
+zygo genomes and related datasets
