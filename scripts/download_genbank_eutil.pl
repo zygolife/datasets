@@ -21,7 +21,7 @@ my $cache_keep_time = '2 day';
 
 my $force = 0;
 my $debug = 0;
-my $retmax = 1000;
+my $retmax = 100;
 my $runonce = 0;
 my $use_cache = 1;
 
@@ -65,23 +65,24 @@ while (my $row = $csv->getline ($fh)) {
 					 'family' => $row->[ $header{Family} ],
 					 'source' => $row->[ $header{Source} ],
 					 'accessions' => $row->[ $header{Accession}] };
-    if( $row->[$header{Source} ] eq 'GB' ) {
+    if( $row->[$header{Source} ] =~ /GB/ ) {
 	# keep track of the species which we would like to get from JGI 
 	$gbk_targets{$row->[ $header{species} ]} = 1;
     }
 }
+
 for my $species ( keys %orgs ) {
 
     my ($family, $strain, $source,
 	$accessions) = map { $orgs{$species}->{$_} } qw(family strain source accessions);
 
     next if ! $accessions;    
-    next if $source ne 'GB';
+    next if $source !~ /GB/;
     warn("family is $family species is $species accession is $accessions\n");
 
     my $speciesnospaces = "$species $strain";
     $speciesnospaces =~ s/[\s\/#]/_/g;
-    warn("processing $speciesnospaces\n");
+    warn("processing $speciesnospaces\n") if $debug;
     my $targetdir = File::Spec->catfile($basedir,$family,$speciesnospaces,"gbk");
     next if( $fast && -d $targetdir );
     mkpath($targetdir);
@@ -127,8 +128,9 @@ for my $species ( keys %orgs ) {
     my @qstring;
     for my $l ( keys %acc_query ) {
 	my @nums = sort { $a <=> $b } map { int($_) } keys %{$acc_query{$l}->{n}};
-	my @collapsed = collapse_nums(@nums);    
+	my @collapsed = collapse_nums(@nums);
 	my $nl = $acc_query{$l}->{nl};
+	warn("nl is $nl for $l and nums are @nums\n") if $debug;
 	for my $nm ( @collapsed ) {
 	    if( $nm =~ /[-]/ ) {		
 		my ($from,$to) = split('-',$nm);
@@ -137,13 +139,14 @@ for my $species ( keys %orgs ) {
 		push @qstring,sprintf("%s:%s[ACCN]",$from,$to)
 	    } else {
 		my $nm2 = sprintf("%s%0".$nl."d",$l,$nm);
+		warn("nm2 is $nm2\n") if $debug;
 		push @qstring,sprintf("%s[ACCN]",$nm2);
 	    }
 	}
     }
     while ( @qstring ) { 
-
-	for my $set ( [splice(@qstring,0,100)] ) {
+	warn("query string is @qstring\n") if $debug;
+	for my $set ( [splice(@qstring,0,$retmax)] ) {
 	    my $qstring = join(" OR ", @$set); #  . " " . join(" ",@not);
 	    warn("query for $species\n") if $debug;
 	    warn("qstring is $qstring\n") if $debug;
@@ -176,7 +179,7 @@ for my $species ( keys %orgs ) {
 			    last;
 			} elsif(/^FEATURES/) {
 			    last;
-			}	    
+			}
 		    }
 		    unless( $acc ) {
 			warn("no Accession for $id\n");
@@ -199,8 +202,10 @@ sub collapse_nums {
 # This is probably not the slickest connectivity algorithm, but will do for now.
     my @a = @_;
     my ($from, $to, $i, @ca, $consec);
-
     $consec = 0;
+    if(scalar @a == 1 ) {
+	return @a;
+    }
     for($i=0; $i < @a; $i++) {
 	not $from and do{ $from = $a[$i]; next; };
 	if($a[$i] == $a[$i-1]+1) {
@@ -214,7 +219,7 @@ sub collapse_nums {
 	    $consec = 0;
 	    $to = undef;
 	}
-    }
+    }    
     if(defined $to) {
 	if($consec == 1) { $from .= ",$to"; }
 	else { $from .= $consec>1 ? "\-$to" : ""; }
