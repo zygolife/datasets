@@ -14,6 +14,7 @@ use Bio::SeqIO;
 use IO::String;
 
 my $base = 'http://eutils.ncbi.nlm.nih.gov/entrez/eutils/';
+my $trace_wgs_base = 'http://www.ncbi.nlm.nih.gov/Traces/wgs/?download=%s.%d.gbff.gz';
 my $SLEEP_TIME = 1;
 my $cache_dir = "eutils_".$ENV{USER}.".cache";
 my $cache_filehandle;
@@ -66,13 +67,12 @@ while (my $row = $csv->getline ($fh)) {
 					 'source' => $row->[ $header{Source} ],
 					 'accessions' => $row->[ $header{Accession}] };
     if( $row->[$header{Source} ] =~ /GB/ ) {
-	# keep track of the species which we would like to get from JGI 
+	# keep track of the species which we would like to get from GenBank
 	$gbk_targets{$row->[ $header{species} ]} = 1;
     }
 }
 
 for my $species ( keys %orgs ) {
-
     my ($family, $strain, $source,
 	$accessions) = map { $orgs{$species}->{$_} } qw(family strain source accessions);
 
@@ -87,6 +87,15 @@ for my $species ( keys %orgs ) {
     next if( $fast && -d $targetdir );
     mkpath($targetdir);
     my %acc_query;
+    my @targetfiles;
+    if ( $source eq 'GB' && $accessions !~ /\-/ ) {
+	my $test_target = File::Spec->catfile($targetdir,"$accessions.gbk.gz");
+	if( -f $test_target ) {
+	    warn("see $test_target -- skipping this $source for $species. rm file if you want to re-download the collection for this master accession\n");
+	    next;
+	}
+    }
+    
     for my $pair ( split(/;/,$accessions) ) {
         my ($start,$finish) = split(/-/,$pair);
         my ($s_letter,$s_number, $f_letter,$f_number);
@@ -112,15 +121,19 @@ for my $species ( keys %orgs ) {
             }
             for(my $i = $s_number; $i <= $f_number; $i++) {
 		my $acc = sprintf("%s%0".$nl."d",$s_letter,$i);
-                if( ! -f File::Spec->catfile($targetdir,"$acc.gbk.gz")) {
+		my $target = File::Spec->catfile($targetdir,"$acc.gbk.gz");
+                if( ! -f $target ) { 
 		    $acc_query{$s_letter}->{n}->{$i}++;
-		    # warn("$acc.gbk.gz missing going to request it\n") if $debug;
+		    warn("$acc.gbk.gz missing going to request it\n") if $debug;
                 } else {
-		    # warn("I see $acc.gb.gz, skipping\n") if $debug;
+		    push @targetfiles, $target;
+#		    warn("I see $acc.gb.gz, skipping\n") if $debug;
 		}
             }
         } else {
-            next if -f File::Spec->catfile($targetdir,"$start.gbk.gz");
+	    my $targetfile = File::Spec->catfile($targetdir,"$start.gbk.gz");
+	    push @targetfiles, $targetfile;
+            next if -f $targetfile;
 	    $acc_query{$s_letter}->{n}->{$s_number}++;
         }
     }
@@ -140,17 +153,14 @@ for my $species ( keys %orgs ) {
 	    } else {
 		my $nm2 = sprintf("%s%0".$nl."d",$l,$nm);
 		warn("nm2 is $nm2\n") if $debug;
-		push @qstring,sprintf("%s[ACCN]",$nm2);
-	    }
+		push @qstring, sprintf("%s",$nm2);
+	     }
 	}
     }
-    while ( @qstring ) { 
-	warn("query string is @qstring\n") if $debug;
+    while ( @qstring ) {
 	for my $set ( [splice(@qstring,0,$retmax)] ) {
 	    my $qstring = join(" OR ", @$set); #  . " " . join(" ",@not);
-	    warn("query for $species\n") if $debug;
-	    warn("qstring is $qstring\n") if $debug;
-
+	    warn("Query: $qstring for $species\n") if $debug;	    
 	    my $url = sprintf('esearch.fcgi?db=nuccore&tool=bioperl&retmax=%d&term=%s',$retmax,$qstring);
 	    #delete_cache($base,$url);
 	    my $output = get($base.$url);
@@ -166,12 +176,18 @@ for my $species ( keys %orgs ) {
 	    if( ref($ids) !~ /ARRAY/ ) {
 		$ids = [$ids];
 	    }
+	    warn("ids are @$ids\n");
 	    for my $id ( @$ids ) {
 		next if ! $id;
-		$url = sprintf('efetch.fcgi?retmode=text&rettype=gbwithparts&db=nuccore&tool=bioperl&retmax=%d&id=%s',$retmax,$id);
+		if( $source eq 'GB' ) {
+		    $url = sprintf('efetch.fcgi?retmode=text&rettype=gbwithparts&db=nuccore&tool=bioperl&retmax=%d&id=%s',$retmax,$id);
+		} else {
+		    $url = sprintf('efetch.fcgi?retmode=text&rettype=gb&db=nuccore&tool=bioperl&retmax=%d&id=%s',$retmax,$id);		    
+		}
+		warn("url is $url\n") if $debug;
 		sleep $SLEEP_TIME;
 		if( $output = get($base.$url) ) {
-		    my $acc;
+		    my ($acc);
 		    my $io = IO::String->new($output);
 		    while(<$io>) {
 			if( /^ACCESSION\s+(\S+)/ ) {
@@ -188,10 +204,53 @@ for my $species ( keys %orgs ) {
 		    my $targetfile = File::Spec->catfile($targetdir,"$acc.gbk.gz");
 		    open(my $ofh => "| gzip -c > $targetfile") || die $!;
 		    print $ofh $output;
+		    push @targetfiles, $targetfile;
 		}
 	    }
 	}
-#	last if $runonce;
+	last if $runonce;
+    }
+
+    if( $source eq 'GB-WGS') {
+	my $targetfile;
+	if( @targetfiles == 1 ) {
+	    ($targetfile) = @targetfiles;
+	} else {
+	    warn("too many targetfiles '@targetfiles'\n");
+	    next;
+	}
+	open(my $tfile => "zcat $targetfile | ") || die $!;
+	my ($locus,$acc,$version,@range);
+	while(<$tfile>) {
+	    if( /^LOCUS\s+(\S+)/ ) {
+		$locus = $1;
+	    } elsif( /^ACCESSION\s+(\S+)(.+)/ ) {
+		$acc = $1;
+		my (undef,$secondary) = split(/\s+/,$2);
+		if( $secondary ) {
+		    warn("got secondary $secondary\n") if $debug;
+		}
+	    } elsif( /^VERSION\s+(\S+)/ ) {
+		my ($p,$ver) = split(/\./,$1);
+		$version = $ver;
+	    } elsif(/^WGS\s+(\S+)/) {
+		push @range, $1;
+	    }
+	}
+	unless( $acc && $locus ) {
+	    warn("no Accession or Locus for $targetfile\n");
+	}
+	my $asm_prefix = substr($locus,0,6);
+	my $url = sprintf($trace_wgs_base,$asm_prefix,$version);
+	warn("source is $source and prefix is $asm_prefix url is $url locus is $locus\n");
+	my $outasm = File::Spec->catfile($targetdir,sprintf("$asm_prefix.$version.gbff.gz"));
+	if( ! -f $outasm ) {
+	    warn("getting $url --> $outasm\n");
+	    `curl -C - -o $outasm $url`;	    
+	}
+	#'http://www.ncbi.nlm.nih.gov/Traces/wgs/?download=JNEQ01.1.gbff.gz';
+    } else {
+	warn("source $source is ignored\n");
     }
     last if $runonce;
 }
