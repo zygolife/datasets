@@ -1,4 +1,4 @@
-#!/usr/bin/perl 
+#!/usr/bin/env perl
 use strict;
 use warnings;
 use Data::Dumper;
@@ -19,6 +19,7 @@ my $SLEEP_TIME = 1;
 my $cache_dir = "eutils_".$ENV{USER}.".cache";
 my $cache_filehandle;
 my $cache_keep_time = '2 day';
+my $CURL = 'curl';
 
 my $force = 0;
 my $debug = 0;
@@ -246,7 +247,7 @@ for my $species ( keys %orgs ) {
 	my $outasm = File::Spec->catfile($targetdir,sprintf("$asm_prefix.$version.gbff.gz"));
 	if( ! -f $outasm ) {
 	    warn("getting $url --> $outasm\n");
-	    `curl -C - -o $outasm $url`;	    
+	    `$CURL -C - -o $outasm $url`;	    
 	}
 	#'http://www.ncbi.nlm.nih.gov/Traces/wgs/?download=JNEQ01.1.gbff.gz';
     } else {
