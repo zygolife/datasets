@@ -1,4 +1,6 @@
-datasets
+Zygo Datasets
 ========
+Genomic and Isolate databases supporting tracking of available
+material for Zygomycete Genealogy of Life project.
 
-zygo genomes and related datasets
+http://zygolife.org
