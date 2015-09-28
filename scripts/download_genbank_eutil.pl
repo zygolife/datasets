@@ -63,19 +63,21 @@ for my $r ( @$header ) {
 
 while (my $row = $csv->getline ($fh)) {
     next if( $row->[0] =~ /^\#/);
-    $orgs{$row->[ $header{species}]} = { 'strain' => $row->[ $header{strain} ],
-					 'family' => $row->[ $header{Family} ],
-					 'source' => $row->[ $header{Source} ],
-					 'accessions' => $row->[ $header{Accession}] };
+    my $key = join(" ",$header{species},$row->[ $header{strain}]);
+    $orgs{$key} = { 'species' => $row->[0],
+		    'strain' => $row->[ $header{strain} ],
+		    'family' => $row->[ $header{Family} ],
+		    'source' => $row->[ $header{Source} ],
+		    'accessions' => $row->[ $header{Accession}] };
     if( $row->[$header{Source} ] =~ /GB/ ) {
 	# keep track of the species which we would like to get from GenBank
 	$gbk_targets{$row->[ $header{species} ]} = 1;
     }
 }
 
-for my $species ( keys %orgs ) {
-    my ($family, $strain, $source,
-	$accessions) = map { $orgs{$species}->{$_} } qw(family strain source accessions);
+for my $key ( keys %orgs ) {
+    my ($species, $family, $strain, $source,
+	$accessions) = map { $orgs{$key}->{$_} } qw(species family strain source accessions);
 
     next if ! $accessions;    
     next if $source !~ /GB/;
@@ -150,7 +152,7 @@ for my $species ( keys %orgs ) {
 		my ($from,$to) = split('-',$nm);
 		$from = sprintf("%s%0".$nl."d",$l,$from);
 		$to = sprintf("%s%0".$nl."d",$l,$to);
-		push @qstring,sprintf("%s:%s[ACCN]",$from,$to)
+		push @qstring,sprintf("%s:%s[PACC]",$from,$to)
 	    } else {
 		my $nm2 = sprintf("%s%0".$nl."d",$l,$nm);
 		warn("nm2 is $nm2\n") if $debug;
@@ -218,7 +220,7 @@ for my $species ( keys %orgs ) {
 	    ($targetfile) = @targetfiles;
 	} else {
 	    warn("too many targetfiles '@targetfiles'\n");
-	    next;
+	    #next;
 	}
 	open(my $tfile => "zcat $targetfile | ") || die $!;
 	my ($locus,$acc,$version,@range);
